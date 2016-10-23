@@ -1,8 +1,11 @@
 <resources>
     <string name="app_name">Live</string>
+
     <string name="play">Play</string>
+    <string name="pause">Pause</string>
     <string name="stop">Stop</string>
     <string name="loading">Loading</string>
+    <string name="close">Close</string>
 
     <string name="radio_metro">Radio Metro</string>
     <string name="radio_blue">Radio Blue</string>

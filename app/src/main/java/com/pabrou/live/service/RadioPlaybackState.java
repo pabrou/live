@@ -5,5 +5,5 @@ package com.pabrou.live.service;
  */
 
 public enum RadioPlaybackState {
-    PLAYING, STOPPED, LOADING
+    PLAYING, PAUSED, STOPPED, LOADING
 }

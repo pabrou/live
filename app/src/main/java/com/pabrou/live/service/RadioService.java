@@ -1,8 +1,6 @@
 package com.pabrou.live.service;
 
 import android.app.Notification;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -15,16 +13,14 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.support.annotation.Nullable;
 import android.support.v4.content.LocalBroadcastManager;
-import android.support.v7.app.NotificationCompat;
 import android.util.Log;
 import android.widget.Toast;
 
-import com.pabrou.live.MainActivity;
+import com.pabrou.live.NotificationHelper;
 
 import java.io.IOException;
 
-import static android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END;
-import static android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START;
+import static com.pabrou.live.NotificationHelper.EXTRA_URL;
 import static com.pabrou.live.service.RadioPlaybackState.LOADING;
 import static com.pabrou.live.service.RadioPlaybackState.PLAYING;
 import static com.pabrou.live.service.RadioPlaybackState.STOPPED;
@@ -33,20 +29,16 @@ import static com.pabrou.live.service.RadioPlaybackState.STOPPED;
  * Created by pablo on 12/10/16.
  */
 
-public class RadioService extends Service implements MediaPlayer.OnErrorListener,
-        MediaPlayer.OnPreparedListener,
-        MediaPlayer.OnBufferingUpdateListener,
-        MediaPlayer.OnInfoListener {
+public class RadioService extends Service implements
+        MediaPlayer.OnErrorListener,
+        MediaPlayer.OnPreparedListener {
 
-    public final static int NOTIFICATION_ID = 67234;
+    private final static int NOTIFICATION_ID = 67234;
+    private final static String WIFI_LOCK = "radioServiceLock";
 
-    public final static String WIFI_LOCK = "radioServiceLock";
     public final static String PLAYBACK_STATE = "playbackState";
     public final static String EXTRA_STATE = "extraPlaybackState";
-    public final static String ACTION_TOGGLE_PLAYBACK = "com.pabrou.live.TOGGLE_PLAYBACK";
-    public final static String ACTION_STOP_PLAYBACK = "com.pabrou.live.STOP_PLAYBACK";
 
-    private NotificationManager mNotificationManager;
     private MediaPlayer mMediaPlayer;
     private WifiManager.WifiLock wifiLock;
 
@@ -69,7 +61,6 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
                 .createWifiLock(WifiManager.WIFI_MODE_FULL, WIFI_LOCK);
 
         mBinder = new RadioBinder(this);
-        mNotificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 
         initPlayer();
 
@@ -78,26 +69,29 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_TOGGLE_PLAYBACK.equals(intent.getAction())){
-            togglePlayback();
-        }
-        return START_STICKY;
-    }
 
-    private void togglePlayback() {
-        if (mState == PLAYING){
-            stopPlayback();
-        }else if (mRadioUrl != null){
-            startPlayback(mRadioUrl);
+        if (intent != null && intent.getAction() != null){
+            switch (intent.getAction()){
+                case  NotificationHelper.ACTION_PLAY:
+                    String url = intent.getStringExtra(EXTRA_URL);
+                    startPlayback(url);
+                    break;
+                case NotificationHelper.ACTION_PAUSE:
+                    pausePlayback();
+                    break;
+                case NotificationHelper.ACTION_CLOSE:
+                    stopPlayback();
+                    break;
+            }
         }
+
+        return START_STICKY;
     }
 
     private void initPlayer(){
         mMediaPlayer = new MediaPlayer();
         mMediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
         mMediaPlayer.setOnErrorListener(this);
-        mMediaPlayer.setOnBufferingUpdateListener(this);
-        mMediaPlayer.setOnInfoListener(this);
         mMediaPlayer.setOnPreparedListener(this);
         mMediaPlayer.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
     }
@@ -106,8 +100,10 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
         mRadioUrl = url;
 
         wifiLock.acquire();
-        showPlayingNotification();
-        //showForegroundNotification();
+
+        Notification playingNotification = NotificationHelper.newPlayingNotification(
+                getApplicationContext(), mRadioUrl);
+        startForeground(NOTIFICATION_ID, playingNotification);
 
         if (mMediaPlayer.isPlaying())
             mMediaPlayer.stop();
@@ -128,6 +124,23 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
         }
     }
 
+    private void pausePlayback() {
+        Notification pausedNotification = NotificationHelper.newPausedNotification(
+                getApplicationContext(), mRadioUrl);
+        startForeground(NOTIFICATION_ID, pausedNotification);
+
+        if (mMediaPlayer.isPlaying()) {
+            mMediaPlayer.pause();
+        }
+
+        if (wifiLock.isHeld())
+            wifiLock.release();
+
+        mState = STOPPED;
+        notifyPlaybackStateChange();
+        stopForeground(false);
+    }
+
     @Override
     public void onPrepared(MediaPlayer mp) {
         mMediaPlayer.start();
@@ -137,7 +150,9 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
     }
 
     public void stopPlayback(){
-        showPausedNotification();
+        Notification pausedNotification = NotificationHelper.newPausedNotification(
+                getApplicationContext(), mRadioUrl);
+        startForeground(NOTIFICATION_ID, pausedNotification);
 
         if (mMediaPlayer.isPlaying()) {
             mMediaPlayer.stop();
@@ -151,6 +166,8 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
         mState = STOPPED;
         notifyPlaybackStateChange();
         stopForeground(false);
+
+        stopSelf();
     }
 
     public RadioPlaybackState getPlaybackState(){
@@ -169,88 +186,6 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
         // Release the player
         mMediaPlayer.release();
         mMediaPlayer = null;
-    }
-
-    public void showForegroundNotification(){
-
-        Intent togglePlaybackIntent = new Intent(getApplicationContext(), RadioService.class);
-        togglePlaybackIntent.setAction(ACTION_TOGGLE_PLAYBACK);
-
-        PendingIntent togglePlaybackPendingIntent = PendingIntent.getService(getApplicationContext(), 1,
-                togglePlaybackIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-
-        Intent stopPlaybackIntent = new Intent(getApplicationContext(), RadioService.class);
-        stopPlaybackIntent.setAction(ACTION_STOP_PLAYBACK);
-
-        PendingIntent stopPlaybackPendingIntent = PendingIntent.getService(getApplicationContext(), 2,
-                stopPlaybackIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-
-        PendingIntent mainActivityPendingIntent = PendingIntent.getActivity(getApplicationContext(), 0,
-                new Intent(getApplicationContext(), MainActivity.class),
-                PendingIntent.FLAG_UPDATE_CURRENT);
-
-        Notification notification = new NotificationCompat.Builder(this)
-                        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                        .addAction(android.R.drawable.ic_media_play, "Play", togglePlaybackPendingIntent)
-                        .addAction(android.R.drawable.ic_media_pause, "Stop", stopPlaybackPendingIntent)
-                        .setStyle(new NotificationCompat.MediaStyle()
-                                .setShowActionsInCompactView(0)
-                                .setShowActionsInCompactView(1)
-                                .setShowCancelButton(true))
-                        .setSmallIcon(android.R.drawable.ic_media_play)
-                        .setContentTitle("My notification")
-                        .setContentIntent(mainActivityPendingIntent)
-                        .setContentText(mRadioUrl).build();
-
-        startForeground(NOTIFICATION_ID, notification);
-    }
-
-    private android.support.v4.app.NotificationCompat.Builder getNotificationBuilder(){
-
-        PendingIntent mainActivityPendingIntent = PendingIntent.getActivity(getApplicationContext(), 0,
-                new Intent(getApplicationContext(), MainActivity.class),
-                PendingIntent.FLAG_UPDATE_CURRENT);
-
-        return new NotificationCompat.Builder(this)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentTitle("My notification")
-                .setContentIntent(mainActivityPendingIntent)
-                .setContentText(mRadioUrl);
-    }
-
-    private void showPlayingNotification(){
-        Intent togglePlaybackIntent = new Intent(getApplicationContext(), RadioService.class);
-        togglePlaybackIntent.setAction(ACTION_TOGGLE_PLAYBACK);
-
-        PendingIntent togglePlaybackPendingIntent = PendingIntent.getService(getApplicationContext(), 1,
-                togglePlaybackIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-
-        Notification notification = getNotificationBuilder()
-                .addAction(android.R.drawable.ic_media_pause, "Stop", togglePlaybackPendingIntent)
-                .setStyle(new NotificationCompat.MediaStyle()
-                .setShowActionsInCompactView(0)
-                .setShowCancelButton(true)).build();
-
-        startForeground(NOTIFICATION_ID, notification);
-        //mNotificationManager.notify(NOTIFICATION_ID, notification);
-    }
-
-    private void showPausedNotification(){
-        Intent togglePlaybackIntent = new Intent(getApplicationContext(), RadioService.class);
-        togglePlaybackIntent.setAction(ACTION_TOGGLE_PLAYBACK);
-
-        PendingIntent togglePlaybackPendingIntent = PendingIntent.getService(getApplicationContext(), 1,
-                togglePlaybackIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-
-        Notification notification = getNotificationBuilder()
-                .addAction(android.R.drawable.ic_media_play, "Play", togglePlaybackPendingIntent)
-                .setStyle(new NotificationCompat.MediaStyle()
-                        .setShowActionsInCompactView(0)
-                        .setShowCancelButton(true)).build();
-
-        startForeground(NOTIFICATION_ID, notification);
-        //mNotificationManager.notify(NOTIFICATION_ID, notification);
     }
 
     @Override
@@ -275,22 +210,4 @@ public class RadioService extends Service implements MediaPlayer.OnErrorListener
             }
         }
     };
-
-    @Override
-    public void onBufferingUpdate(MediaPlayer mp, int percent) {
-        Log.d("onBufferingUpdate", "percent:"+percent);
-    }
-
-    @Override
-    public boolean onInfo(MediaPlayer mp, int what, int extra) {
-        Log.d("onInfo", "what:"+what);
-        if (what == MEDIA_INFO_BUFFERING_START){
-            Log.d("onInfo", "buffering start");
-        }else if (what == MEDIA_INFO_BUFFERING_END){
-            Log.d("onInfo", "buffering stop");
-        }else if(what == 703){ // MEDIA_INFO_NETWORK_BANDWIDTH = 703
-            Log.d("onInfo", "bandwidth");
-        }
-        return true;
-    }
 }

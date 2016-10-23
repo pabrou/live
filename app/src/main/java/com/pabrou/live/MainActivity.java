@@ -33,9 +33,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        Intent intent = new Intent(this, RadioService.class);
-        startService(intent);
-
         radioGroup = (RadioGroup) findViewById(R.id.rg_radios);
 
         playbackButton = (Button) findViewById(R.id.bt_playback);
@@ -69,9 +66,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-
         // Bind to RadioService
         Intent intent = new Intent(this, RadioService.class);
+        startService(intent);
         bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
     }
 
