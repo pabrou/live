@@ -82,4 +82,10 @@ public class NotificationHelper {
                         closePendingIntent)
                 .setContentIntent(mainActivityPendingIntent);
     }
+
+    public static final PendingIntent newMainActivityPendingIntent(Context context){
+        Intent intent = new Intent(context, MainActivity.class);
+        return PendingIntent.getActivity(context, 99, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+    }
 }

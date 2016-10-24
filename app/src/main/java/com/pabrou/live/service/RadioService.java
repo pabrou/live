@@ -1,89 +1,156 @@
 package com.pabrou.live.service;
 
-import android.app.Notification;
-import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
-import android.net.wifi.WifiManager;
-import android.os.IBinder;
+import android.net.Uri;
+import android.os.Bundle;
 import android.os.PowerManager;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.support.v4.content.LocalBroadcastManager;
+import android.support.v4.media.MediaBrowserCompat;
+import android.support.v4.media.MediaBrowserServiceCompat;
+import android.support.v4.media.session.MediaButtonReceiver;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 import android.widget.Toast;
 
 import com.pabrou.live.NotificationHelper;
+import com.pabrou.live.R;
 
 import java.io.IOException;
-
-import static com.pabrou.live.NotificationHelper.EXTRA_URL;
-import static com.pabrou.live.service.RadioPlaybackState.LOADING;
-import static com.pabrou.live.service.RadioPlaybackState.PLAYING;
-import static com.pabrou.live.service.RadioPlaybackState.STOPPED;
+import java.util.List;
 
 /**
  * Created by pablo on 12/10/16.
  */
 
-public class RadioService extends Service implements
+public class RadioService extends MediaBrowserServiceCompat implements
         MediaPlayer.OnErrorListener,
         MediaPlayer.OnPreparedListener {
 
-    private final static int NOTIFICATION_ID = 67234;
-    private final static String WIFI_LOCK = "radioServiceLock";
+    private final static String TAG = "RadioService";
 
-    public final static String PLAYBACK_STATE = "playbackState";
-    public final static String EXTRA_STATE = "extraPlaybackState";
+    private static final String BLUE = "http://mp3.metroaudio1.stream.avstreaming.net:7200/bluefmaudio1";
+
+    private final static int NOTIFICATION_ID = 67234;
+//    private final static String WIFI_LOCK = "radioServiceLock";
+
 
     private MediaPlayer mMediaPlayer;
-    private WifiManager.WifiLock wifiLock;
+    private MediaSessionCompat mSession;
+//    private WifiManager.WifiLock wifiLock;
 
-    private IBinder mBinder;
+//    private IBinder mBinder;
 
-    private RadioPlaybackState mState = STOPPED;
+//    private RadioPlaybackState mState = STOPPED;
     private String mRadioUrl;
-
-    @Nullable
-    @Override
-    public IBinder onBind(Intent intent) {
-        return mBinder;
-    }
 
     @Override
     public void onCreate() {
         super.onCreate();
 
-        wifiLock = ((WifiManager) getSystemService(Context.WIFI_SERVICE))
-                .createWifiLock(WifiManager.WIFI_MODE_FULL, WIFI_LOCK);
+        Log.d(TAG, "onCreate");
 
-        mBinder = new RadioBinder(this);
+//        wifiLock = ((WifiManager) getSystemService(Context.WIFI_SERVICE))
+//                .createWifiLock(WifiManager.WIFI_MODE_FULL, WIFI_LOCK);
+
+        mSession = new MediaSessionCompat(this, RadioService.class.getSimpleName());
+        setSessionToken(mSession.getSessionToken());
+        mSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
+                MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mSession.setCallback(new MediaSessionCompat.Callback() {
+            @Override
+            public void onPlay() {
+                super.onPlay();
+                Log.d(TAG, "onPlay");
+                startPlayback(BLUE);
+
+                PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PAUSE |
+                                PlaybackStateCompat.ACTION_STOP);
+                stateBuilder.setState(PlaybackStateCompat.STATE_PLAYING,
+                        PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1);
+
+                mSession.setPlaybackState(stateBuilder.build());
+            }
+
+            @Override
+            public void onPrepare() {
+                super.onPrepare();
+                Log.d(TAG, "onPrepare");
+            }
+
+            @Override
+            public void onPause() {
+                super.onPause();
+                Log.d(TAG, "onPause");
+                pausePlayback();
+
+                PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PLAY |
+                                PlaybackStateCompat.ACTION_STOP);
+                stateBuilder.setState(PlaybackStateCompat.STATE_PAUSED,
+                        PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
+
+                mSession.setPlaybackState(stateBuilder.build());
+            }
+
+            @Override
+            public void onStop() {
+                super.onStop();
+                Log.d(TAG, "onStop");
+                stopPlayback();
+
+                PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PAUSE |
+                                PlaybackStateCompat.ACTION_STOP);
+                stateBuilder.setState(PlaybackStateCompat.STATE_STOPPED,
+                        PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
+
+                mSession.setPlaybackState(stateBuilder.build());
+
+            }
+
+            @Override
+            public void onPlayFromUri(Uri uri, Bundle extras) {
+                super.onPlayFromUri(uri, extras);
+                Log.d(TAG, "onPlayFromUri");
+            }
+        });
+
+        mSession.setSessionActivity(NotificationHelper.
+                newMainActivityPendingIntent(getApplicationContext()));
 
         initPlayer();
-
-        registerReceiver(receiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand");
 
-        if (intent != null && intent.getAction() != null){
-            switch (intent.getAction()){
-                case  NotificationHelper.ACTION_PLAY:
-                    String url = intent.getStringExtra(EXTRA_URL);
-                    startPlayback(url);
-                    break;
-                case NotificationHelper.ACTION_PAUSE:
-                    pausePlayback();
-                    break;
-                case NotificationHelper.ACTION_CLOSE:
-                    stopPlayback();
-                    break;
-            }
+        if (intent != null){
+            MediaButtonReceiver.handleIntent(mSession, intent);
         }
+
+//        if (intent != null && intent.getAction() != null){
+//            switch (intent.getAction()){
+//                case  NotificationHelper.ACTION_PLAY:
+//                    String url = intent.getStringExtra(EXTRA_URL);
+//                    startPlayback(url);
+//                    break;
+//                case NotificationHelper.ACTION_PAUSE:
+//                    pausePlayback();
+//                    break;
+//                case NotificationHelper.ACTION_CLOSE:
+//                    stopPlayback();
+//                    break;
+//            }
+//        }
 
         return START_STICKY;
     }
@@ -96,82 +163,58 @@ public class RadioService extends Service implements
         mMediaPlayer.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
     }
 
-    public void startPlayback(String url){
+    private void startPlayback(String url){
+        startService(new Intent(getApplicationContext(), RadioService.class));
+
+        if (!mSession.isActive()) {
+            mSession.setActive(true);
+        }
+
         mRadioUrl = url;
 
-        wifiLock.acquire();
-
-        Notification playingNotification = NotificationHelper.newPlayingNotification(
-                getApplicationContext(), mRadioUrl);
-        startForeground(NOTIFICATION_ID, playingNotification);
+//        wifiLock.acquire();
+        registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
 
         if (mMediaPlayer.isPlaying())
-            mMediaPlayer.stop();
+            return;
 
         // Reset to the uninitialized state
         mMediaPlayer.reset();
-
         try {
             mMediaPlayer.setDataSource(mRadioUrl);
             mMediaPlayer.prepareAsync();
-
-            mState = LOADING;
-            notifyPlaybackStateChange();
-
         } catch (IOException e) {
             e.printStackTrace();
-            Toast.makeText(this, "Error initializing player", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    private void pausePlayback() {
-        Notification pausedNotification = NotificationHelper.newPausedNotification(
-                getApplicationContext(), mRadioUrl);
-        startForeground(NOTIFICATION_ID, pausedNotification);
-
-        if (mMediaPlayer.isPlaying()) {
-            mMediaPlayer.pause();
-        }
-
-        if (wifiLock.isHeld())
-            wifiLock.release();
-
-        mState = STOPPED;
-        notifyPlaybackStateChange();
-        stopForeground(false);
     }
 
     @Override
     public void onPrepared(MediaPlayer mp) {
         mMediaPlayer.start();
-
-        mState = PLAYING;
-        notifyPlaybackStateChange();
     }
 
-    public void stopPlayback(){
-        Notification pausedNotification = NotificationHelper.newPausedNotification(
-                getApplicationContext(), mRadioUrl);
-        startForeground(NOTIFICATION_ID, pausedNotification);
+    private void pausePlayback() {
 
         if (mMediaPlayer.isPlaying()) {
-            mMediaPlayer.stop();
-        }else if (mState == LOADING) {
-            mMediaPlayer.reset();
+            mMediaPlayer.pause();
         }
 
-        if (wifiLock.isHeld())
-            wifiLock.release();
+//        unregisterReceiver(noisyReceiver);
 
-        mState = STOPPED;
-        notifyPlaybackStateChange();
-        stopForeground(false);
-
-        stopSelf();
+//        if (wifiLock.isHeld())
+//            wifiLock.release();
     }
 
-    public RadioPlaybackState getPlaybackState(){
-        return mState;
+    private void stopPlayback(){
+        if (mMediaPlayer.isPlaying())
+            mMediaPlayer.stop();
+
+        mSession.setActive(false);
+
+//        if (wifiLock.isHeld())
+//            wifiLock.release();
+
+        stopSelf();
     }
 
     @Override
@@ -181,11 +224,22 @@ public class RadioService extends Service implements
         // Stop playback in case it's still playing
         stopPlayback();
 
-        unregisterReceiver(receiver);
-
         // Release the player
         mMediaPlayer.release();
         mMediaPlayer = null;
+
+        mSession.release();
+    }
+
+    @Nullable
+    @Override
+    public BrowserRoot onGetRoot(@NonNull String clientPackageName, int clientUid, @Nullable Bundle rootHints) {
+        return new BrowserRoot(getString(R.string.app_name), null);
+    }
+
+    @Override
+    public void onLoadChildren(@NonNull String parentId, @NonNull Result<List<MediaBrowserCompat.MediaItem>> result) {
+        result.sendResult(null);
     }
 
     @Override
@@ -195,13 +249,7 @@ public class RadioService extends Service implements
         return false;
     }
 
-    private void notifyPlaybackStateChange(){
-        Intent intent = new Intent(PLAYBACK_STATE);
-        intent.putExtra(EXTRA_STATE, mState);
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
-    }
-
-    BroadcastReceiver receiver = new BroadcastReceiver(){
+    BroadcastReceiver noisyReceiver = new BroadcastReceiver(){
         @Override
         public void onReceive(Context ctx, Intent intent) {
             if (intent.getAction().equals(AudioManager.ACTION_AUDIO_BECOMING_NOISY)) {
