@@ -152,7 +152,7 @@ public class RadioService extends MediaBrowserServiceCompat implements
 //            }
 //        }
 
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     private void initPlayer(){
