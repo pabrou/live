@@ -144,6 +144,16 @@ public class MainActivity extends AppCompatActivity {
                         }
                     });
                     break;
+                case PlaybackStateCompat.STATE_STOPPED:
+                    playbackButton.setEnabled(true);
+                    playbackButton.setText(R.string.play);
+                    playbackButton.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            playMedia();
+                        }
+                    });
+                    break;
                 default:
                     playbackButton.setEnabled(false);
                     playbackButton.setText(R.string.stop);
