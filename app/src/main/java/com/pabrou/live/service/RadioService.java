@@ -1,15 +1,25 @@
 package com.pabrou.live.service;
 
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.content.ContextCompat;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaBrowserServiceCompat;
+import android.support.v4.media.MediaDescriptionCompat;
+import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaButtonReceiver;
+import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.support.v7.app.NotificationCompat;
 import android.util.Log;
+import android.view.KeyEvent;
 
 import com.pabrou.live.NotificationHelper;
 import com.pabrou.live.R;
@@ -78,7 +88,7 @@ public class RadioService extends MediaBrowserServiceCompat implements PlaybackM
             MediaButtonReceiver.handleIntent(mSession, intent);
         }
 
-        return super.onStartCommand(intent, flags, startId);
+        return START_NOT_STICKY;
     }
 
 
@@ -124,31 +134,64 @@ public class RadioService extends MediaBrowserServiceCompat implements PlaybackM
 
     @Override
     public void onPlaybackStateChange(int playbackState) {
+
+        PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder();
+
         if (playbackState == PlaybackStateCompat.STATE_PLAYING) {
+            stateBuilder.setActions(PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_STOP);
+            stateBuilder.setState(PlaybackStateCompat.STATE_PLAYING, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1);
 
-            PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
-                    .setActions(PlaybackStateCompat.ACTION_PAUSE |
-                            PlaybackStateCompat.ACTION_STOP);
-            stateBuilder.setState(PlaybackStateCompat.STATE_PLAYING,
-                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1);
-
-            mSession.setPlaybackState(stateBuilder.build());
         } else if (playbackState == PlaybackStateCompat.STATE_PAUSED){
-            PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
-                    .setActions(PlaybackStateCompat.ACTION_PLAY |
-                            PlaybackStateCompat.ACTION_STOP);
-            stateBuilder.setState(PlaybackStateCompat.STATE_PAUSED,
-                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
-
-            mSession.setPlaybackState(stateBuilder.build());
+            stateBuilder.setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_STOP);
+            stateBuilder.setState(PlaybackStateCompat.STATE_PAUSED, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
+            //stopForeground(false);
         } else if (playbackState == PlaybackStateCompat.STATE_STOPPED){
-            PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
-                    .setActions(PlaybackStateCompat.ACTION_PAUSE |
-                            PlaybackStateCompat.ACTION_STOP);
-            stateBuilder.setState(PlaybackStateCompat.STATE_STOPPED,
-                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
-
-            mSession.setPlaybackState(stateBuilder.build());
+            stateBuilder.setActions(PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_STOP);
+            stateBuilder.setState(PlaybackStateCompat.STATE_STOPPED, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 0);
+            //stopForeground(true);
         }
+
+        Bitmap art = BitmapFactory.decodeResource(getResources(), R.drawable.metro_art);
+
+        MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder();
+        metadataBuilder.putText(MediaMetadataCompat.METADATA_KEY_TITLE, "Radio");
+        metadataBuilder.putText(MediaMetadataCompat.METADATA_KEY_ALBUM, "Album");
+        metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art);
+        metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
+
+        mSession.setMetadata(metadataBuilder.build());
+        mSession.setPlaybackState(stateBuilder.build());
+
+        MediaControllerCompat controller = mSession.getController();
+        MediaMetadataCompat mediaMetadata = controller.getMetadata();
+        MediaDescriptionCompat mediaDescription = mediaMetadata.getDescription();
+
+        android.support.v4.app.NotificationCompat.Builder builder = new NotificationCompat.Builder(this)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setContentTitle(mediaDescription.getTitle())
+                .setContentText(mediaDescription.getSubtitle())
+                .setSubText(mediaDescription.getDescription())
+                .setLargeIcon(mediaDescription.getIconBitmap())
+                .setSmallIcon(R.drawable.ic_trophy)
+                .setColor(ContextCompat.getColor(this, R.color.colorPrimary))
+                .setContentIntent(controller.getSessionActivity())
+                .setDeleteIntent(getActionIntent(this, KeyEvent.KEYCODE_MEDIA_STOP))
+                .addAction(new NotificationCompat.Action(
+                        android.R.drawable.ic_media_pause, getString(R.string.pause),
+                        getActionIntent(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)))
+                .setStyle(new NotificationCompat.MediaStyle()
+                        .setShowActionsInCompactView(0)
+                        .setMediaSession(mSession.getSessionToken())
+                        .setShowCancelButton(true)
+                        .setCancelButtonIntent(getActionIntent(this, KeyEvent.KEYCODE_MEDIA_STOP)));
+
+        startForeground(NOTIFICATION_ID, builder.build());
+    }
+
+    public PendingIntent getActionIntent(Context context, int mediaKeyEvent){
+        Intent intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+        intent.setPackage(context.getPackageName());
+        intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_DOWN, mediaKeyEvent));
+        return PendingIntent.getBroadcast(context, mediaKeyEvent, intent, 0);
     }
 }
